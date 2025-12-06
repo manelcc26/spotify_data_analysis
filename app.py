@@ -260,7 +260,7 @@ def get_week_range(week_str):
     # Find Sunday of the week
     last_day = first_day + timedelta(days=6)
     # Format as "DD-DD/MM/YY"
-    return f"{first_day.day:01d}-{last_day.day:02d}/{first_day.month:02d}/{str(first_day.year)[-2:]}"
+    return f"{first_day.day:01d}-{last_day.day:01d}/{first_day.month:01d}/{str(first_day.year)[-2:]}"
 
 def get_top_listening_combos(song_df, entries=100, metric="Minutes", granularity="Month", entity_type="Song"):
     # Aggregate data
