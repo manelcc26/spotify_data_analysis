@@ -1,6 +1,7 @@
 [theme]
-primaryColor = "#FF4B4B"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#31333F"
+base = "dark"
+primaryColor = "#FF4B4B"  # A nice red accent color
+backgroundColor = "#1E1E1E"  # Dark background
+secondaryBackgroundColor = "#31333F"  # Slightly lighter dark for secondary elements
+textColor = "#FAFAFA"  # Light text for contrast
 font = "sans serif"
