@@ -154,7 +154,7 @@ def get_timeline_plot(song_df, granularity):
 
     # Customize hover template and hide bar labels
     fig.update_traces(
-        hovertemplate='Period: %{text}<br>Minutes Played: %{y:.1f}',
+        hovertemplate='%{text}<br>%{y:.1f} Minutes',
         textposition='none'  # Hide text labels on bars
     )
 
@@ -413,7 +413,7 @@ plt.rcParams['text.usetex'] = False
 # Title
 st.title("Spotify Data Visualization")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["File Upload", "Your Favorites", "Your Music Timeline", "Favorites per Period", "Your Biggest Addictions"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["File Upload", "Your Favorites", "Your Music Timeline", "Favorites per Period", "Your Biggest Addictions", "Suggestions"])
 
 with tab1:
   # File uploader
@@ -526,3 +526,47 @@ with tab5:
       st.pyplot(plt)
   else:
     st.write("Please upload your file first.")
+
+with tab6:
+    st.text("Did you find a bug or have any suggestion? Contact me and I'll try to do it asap!")
+
+    with st.form("suggestions_form"):
+        name = st.text_input("Your Name (Optional)")
+        st.markdown("Your Comment <span style='color: red'>*</span>", unsafe_allow_html=True)
+        comment = st.text_area("", key="comment", height=150, label_visibility="collapsed")
+
+        submitted = st.form_submit_button("Submit")
+
+        if submitted:
+            if not comment:
+                st.error("Please fill in the comment field!")
+            else:
+                try:
+                    # JavaScript code to send email via EmailJS with Public Key
+                    js_code = f"""
+                    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+                    <script>
+                        (function() {{
+                            emailjs.init('L7Pzgd--LnzVhQLuH'); // Replace with your Public Key
+
+                            var params = {{
+                                name: "{name}",
+                                comment: `{comment}`,
+                                reply_to: "{name}",
+                            }};
+
+                            emailjs.send('service_c769bis', 'template_19n6dyp', params) // Replace with your Service ID and Template ID
+                                .then(function(response) {{
+                                    document.write('<p style="color: green;">Thank you for your feedback! 🎉</p>');
+                                    console.log('SUCCESS!', response.status, response.text);
+                                }}, function(error) {{
+                                    document.write('<p style="color: red;">Failed to send feedback. Please try again later.</p>');
+                                    console.log('FAILED...', error);
+                                }});
+                        }}());
+                    </script>
+                    """
+
+                    st.components.v1.html(js_code, height=100)
+                except Exception as e:
+                    st.error(f"Error: {e}")
