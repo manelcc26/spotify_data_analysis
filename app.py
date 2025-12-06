@@ -1,3 +1,4 @@
+%%writefile app.py
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -154,7 +155,7 @@ def get_timeline_plot(song_df, granularity):
 
     # Customize hover template and hide bar labels
     fig.update_traces(
-        hovertemplate='%{text}<br>%{y:.1f} Minutes',
+        hovertemplate='%{text}<br>%{y:.0f} Minutes',
         textposition='none'  # Hide text labels on bars
     )
 
@@ -262,7 +263,7 @@ def get_week_range(week_str):
     # Format as "DD-DD/MM/YY"
     return f"{first_day.day:01d}-{last_day.day:01d}/{first_day.month:01d}/{str(first_day.year)[-2:]}"
 
-def get_top_listening_combos(song_df, entries=100, metric="Minutes", granularity="Month", entity_type="Song"):
+def get_top_listening_combos(song_df, entries, metric, granularity, entity_type):
     # Aggregate data
     play_data = defaultdict(int)
     play_counts = defaultdict(int)
@@ -310,7 +311,7 @@ def get_top_listening_combos(song_df, entries=100, metric="Minutes", granularity
         ])
 
     # Convert to minutes if needed
-    if metric == "Minutes":
+    if metric == "Total Minutes":
         df["value"] = df["ms"] / 1000 / 60
         metric_label = "Minutes Played"
     else:  # plays
@@ -411,7 +412,7 @@ def extract_data(json_files):
 plt.rcParams['text.usetex'] = False
 
 # Title
-st.title("Spotify Data Visualization")
+st.title("All-time Spotify Recap")
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["File Upload", "Your Favorites", "Your Music Timeline", "Favorites per Period", "Your Biggest Addictions", "Suggestions"])
 
@@ -428,11 +429,13 @@ with tab1:
 
       st.success("File uploaded successfully!")
     except Exception as e:
-      st.error("Something went wrong with your file: " + str(e))
+      st.error("Something went wrong with your file. Are you sure you are uploading the right file?")
       uploaded_file = None
 
   st.write("How to get your file?")
-  st.write("Visit Spotify privacy and follow their instructions. You will receive an email confirming your request. Wait for a few days and Spotify should send your ZIP!")
+  st.write("Go to https://www.spotify.com/us/account/privacy and scroll down to \"Download Your Data\".")
+  st.write("Check \"Select Extended streaming history\" and click on \"Request Data\".")
+  st.write("You will receive an email confirming your request. Wait for a few days (they say 30 days but to me it took 1 day) and Spotify should send your ZIP by email!")
 
 with tab2:
   if uploaded_file:
