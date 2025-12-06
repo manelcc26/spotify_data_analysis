@@ -8,6 +8,8 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from collections import defaultdict
 
+st.set_page_config(page_title="All-Time Spotify Recap", page_icon="🎵")
+
 def get_top_plot(song_df, selected_year, topic, entries, minutes, stacked):
     if selected_year != "All":
       filtered_df = song_df[song_df["year"] == selected_year]
@@ -411,7 +413,7 @@ def extract_data(json_files):
 plt.rcParams['text.usetex'] = False
 
 # Title
-st.title("All-time Spotify Recap")
+st.title("All-Time Spotify Recap")
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["File Upload", "Your Favorites", "Your Music Timeline", "Favorites per Period", "Your Biggest Addictions", "Suggestions"])
 
