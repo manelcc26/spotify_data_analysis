@@ -8,6 +8,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from collections import defaultdict
 import matplotlib
+import os
 
 matplotlib.use('Agg')  # Use non-interactive backend
 plt.ioff()
@@ -430,7 +431,6 @@ def extract_data(json_files):
                   songs.append(entry)
               else:
                   podcasts.append(entry)
-
   df = pd.DataFrame(songs)
 
   df["year"] = pd.to_datetime(df["ts"]).dt.year
@@ -449,10 +449,13 @@ with tab1:
 
   if uploaded_file:
     try:
+      for json_file in glob.glob("Spotify Extended Streaming History/*.json"):
+          os.remove(json_file)
       with zipfile.ZipFile(uploaded_file, "r") as zip_ref:
         zip_ref.extractall("")
       json_files = glob.glob("Spotify Extended Streaming History/*.json")
       song_df, podcasts = extract_data(json_files)
+      st.session_state.song_df = song_df
 
       st.success("File uploaded successfully!")
     except Exception as e:
@@ -468,7 +471,7 @@ with tab2:
     if uploaded_file:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            years = ["All"] + sorted(song_df["year"].unique())
+            years = ["All"] + sorted(st.session_state.song_df["year"].unique())
             selected_year = st.selectbox("Filter by Year:", years, key="year1")
         with col2:
             entries = st.selectbox("Number of Entries:", [10, 25, 50, 100, 200, 300, 500], key="entries1")
@@ -485,7 +488,7 @@ with tab2:
 
         minutes = style == "Total Minutes"
 
-        plt = get_top_plot(song_df, selected_year, topic, entries, minutes, stacked)
+        plt = get_top_plot(st.session_state.song_df, selected_year, topic, entries, minutes, stacked)
 
         with st.container(height=600):
             st.pyplot(plt)
@@ -499,7 +502,7 @@ with tab3:
             ["Week", "Month", "Year"],
             index=1, key="granularity1")
 
-        fig = get_timeline_plot(song_df, granularity)
+        fig = get_timeline_plot(st.session_state.song_df, granularity)
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.write("Please upload your file first.")
@@ -515,7 +518,7 @@ with tab4:
         with col3:
             granularity = st.selectbox("Granularity:", ["Month", "Year"], key="granularity2")
 
-        plt = get_top_per_period_plot(song_df, entity, metric, granularity)
+        plt = get_top_per_period_plot(st.session_state.song_df, entity, metric, granularity)
 
         with st.container(height=600):
             st.pyplot(plt)
@@ -534,7 +537,7 @@ with tab5:
         with col4:
             granularity = st.selectbox("Granularity:", ["Day", "Week", "Month", "Year"], index=2, key="granularity3")
 
-        plt = get_top_listening_combos(song_df, entries, metric, granularity, entity_type)
+        plt = get_top_listening_combos(st.session_state.song_df, entries, metric, granularity, entity_type)
 
         with st.container(height=600):
             st.pyplot(plt)
