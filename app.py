@@ -8,19 +8,22 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from collections import defaultdict
 import matplotlib
-import os
+import io
+import plotly
+import hashlib
 
 matplotlib.use('Agg')  # Use non-interactive backend
 plt.ioff()
 
 st.set_page_config(page_title="All-Time Spotify Recap", page_icon="🎵")
 
-def get_top_plot(song_df, selected_year, topic, entries, minutes, stacked):
-    if selected_year != "All":
+@st.cache_data(show_spinner=False)
+def get_top_plot_data(song_df, selected_year, topic, entries, minutes, stacked):
+  if selected_year != "All":
       filtered_df = song_df[song_df["year"] == selected_year]
-    else:
+  else:
       filtered_df = song_df
-    if topic == "Artists":
+  if topic == "Artists":
         if stacked:
             agg = song_df.groupby(["master_metadata_album_artist_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else song_df[song_df["ms_played"] >= 30000].groupby("master_metadata_album_artist_name").size().sort_values(ascending=False)
             agg["total"] = agg.sum(axis=1)
@@ -28,7 +31,7 @@ def get_top_plot(song_df, selected_year, topic, entries, minutes, stacked):
             agg = agg.drop(columns="total")
         else:
             agg = song_df.groupby("master_metadata_album_artist_name")["ms_played"].sum().sort_values(ascending=False) if minutes else song_df[song_df["ms_played"] >= 30000].groupby("master_metadata_album_artist_name").size().sort_values(ascending=False)
-    elif topic == "Songs":
+  elif topic == "Songs":
         if stacked:
             agg = song_df.groupby(["master_metadata_album_artist_name","master_metadata_track_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else song_df[song_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_track_name", "year"]).size().unstack(fill_value=0)
             agg["total"] = agg.sum(axis=1)
@@ -36,7 +39,7 @@ def get_top_plot(song_df, selected_year, topic, entries, minutes, stacked):
             agg = agg.drop(columns="total")
         else:
             agg = song_df.groupby(["master_metadata_album_artist_name","master_metadata_track_name"])["ms_played"].sum().sort_values(ascending=False) if minutes else song_df[song_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_track_name"]).size().sort_values(ascending=False)
-    elif topic == "Albums":
+  elif topic == "Albums":
         if stacked:
             agg = song_df.groupby(["master_metadata_album_artist_name","master_metadata_album_album_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else song_df[song_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_album_album_name", "year"]).size().unstack(fill_value=0)
             agg["total"] = agg.sum(axis=1)
@@ -45,12 +48,16 @@ def get_top_plot(song_df, selected_year, topic, entries, minutes, stacked):
         else:
             agg = song_df.groupby(["master_metadata_album_artist_name","master_metadata_album_album_name"])["ms_played"].sum().sort_values(ascending=False) if minutes else song_df[song_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_album_album_name"]).size().sort_values(ascending=False)
 
-    if minutes:
-      agg = agg / 60000  # Convert to minutes
+  if minutes:
+    agg = agg / 60000  # Convert to minutes
 
-    agg_top = agg[0:entries]
+  agg_top = agg[0:entries]
 
-    # --- Plot ---
+  return agg_top
+
+def get_top_plot(song_df, selected_year, topic, entries, minutes, stacked):
+
+    agg_top = get_top_plot_data(song_df, selected_year, topic, entries, minutes, stacked)
     height = len(agg_top) * 0.55
 
     if (topic in ["Songs", "Albums"]):
@@ -89,62 +96,67 @@ def get_top_plot(song_df, selected_year, topic, entries, minutes, stacked):
 
     return plt
 
+@st.cache_data(show_spinner=False)
+def get_timeline_plot_data(song_df, granularity):
+  playtime = defaultdict(int)
+  song_df['ts'] = pd.to_datetime(song_df['ts'], format="%Y-%m-%dT%H:%M:%SZ")
+
+  # Create 'period' column based on granularity
+  if granularity == "Month":
+      song_df['period'] = song_df['ts'].dt.strftime("%Y-%m")
+  elif granularity == "Week":
+      song_df['period'] = song_df['ts'].dt.strftime("%Y-W%V")
+  elif granularity == "Year":
+      song_df['period'] = song_df['ts'].dt.strftime("%Y")
+
+  # Aggregate playtime by period
+  playtime = song_df.groupby('period')['ms_played'].sum().to_dict()
+
+  # Convert to minutes and prepare DataFrame
+  periods = sorted(playtime.keys())
+  minutes = [playtime[p] / 1000 / 60 for p in periods]
+
+  df = pd.DataFrame({
+      "Period": periods,
+      "MinutesPlayed": minutes
+  })
+
+  # Add a 'HoverText' column for hover template
+  if granularity == "Week":
+      def get_week_range(week_str):
+          year, week = week_str.split("-W")
+          year = int(year)
+          week = int(week)
+          first_day = datetime.strptime(f"{year}-W{week}-1", "%Y-W%W-%w")
+          last_day = first_day + timedelta(days=6)
+          return f"{first_day.strftime('%d/%m/%y')} - {last_day.strftime('%d/%m/%y')}"
+
+      df["HoverText"] = df["Period"].apply(get_week_range)
+  elif granularity == "Month":
+      def format_month(month_str):
+          year, month = month_str.split("-")
+          month_name = datetime.strptime(month, "%m").strftime("%b")
+          return f"{month_name} {year}"
+
+      df["HoverText"] = df["Period"].apply(format_month)
+  else:
+      df["HoverText"] = df["Period"]
+
+  # Convert 'Period' to datetime for better x-axis handling
+  if granularity == "Month":
+      df["Date"] = pd.to_datetime(df["Period"] + "-01")  # Add day "01" for months
+  elif granularity == "Week":
+      def week_to_datetime(week_str):
+          year, week = map(int, week_str.split("-W"))
+          return datetime.strptime(f"{year}-W{week}-1", "%Y-W%W-%w")  # Monday of the week
+      df["Date"] = df["Period"].apply(week_to_datetime)
+  elif granularity == "Year":
+      df["Date"] = pd.to_datetime(df["Period"], format="%Y")
+
+  return df
+
 def get_timeline_plot(song_df, granularity):
-    playtime = defaultdict(int)
-
-    song_df['ts'] = pd.to_datetime(song_df['ts'], format="%Y-%m-%dT%H:%M:%SZ")
-
-    # Create 'period' column based on granularity
-    if granularity == "Month":
-        song_df['period'] = song_df['ts'].dt.strftime("%Y-%m")
-    elif granularity == "Week":
-        song_df['period'] = song_df['ts'].dt.strftime("%Y-W%V")
-    elif granularity == "Year":
-        song_df['period'] = song_df['ts'].dt.strftime("%Y")
-
-    # Aggregate playtime by period
-    playtime = song_df.groupby('period')['ms_played'].sum().to_dict()
-
-    # Convert to minutes and prepare DataFrame
-    periods = sorted(playtime.keys())
-    minutes = [playtime[p] / 1000 / 60 for p in periods]
-
-    df = pd.DataFrame({
-        "Period": periods,
-        "MinutesPlayed": minutes
-    })
-
-    # Add a 'HoverText' column for hover template
-    if granularity == "Week":
-        def get_week_range(week_str):
-            year, week = week_str.split("-W")
-            year = int(year)
-            week = int(week)
-            first_day = datetime.strptime(f"{year}-W{week}-1", "%Y-W%W-%w")
-            last_day = first_day + timedelta(days=6)
-            return f"{first_day.strftime('%d/%m/%y')} - {last_day.strftime('%d/%m/%y')}"
-
-        df["HoverText"] = df["Period"].apply(get_week_range)
-    elif granularity == "Month":
-        def format_month(month_str):
-            year, month = month_str.split("-")
-            month_name = datetime.strptime(month, "%m").strftime("%b")
-            return f"{month_name} {year}"
-
-        df["HoverText"] = df["Period"].apply(format_month)
-    else:
-        df["HoverText"] = df["Period"]
-
-    # Convert 'Period' to datetime for better x-axis handling
-    if granularity == "Month":
-        df["Date"] = pd.to_datetime(df["Period"] + "-01")  # Add day "01" for months
-    elif granularity == "Week":
-        def week_to_datetime(week_str):
-            year, week = map(int, week_str.split("-W"))
-            return datetime.strptime(f"{year}-W{week}-1", "%Y-W%W-%w")  # Monday of the week
-        df["Date"] = df["Period"].apply(week_to_datetime)
-    elif granularity == "Year":
-        df["Date"] = pd.to_datetime(df["Period"], format="%Y")
+    df = get_timeline_plot_data(song_df, granularity)
 
     # Plot with datetime x-axis
     fig = px.bar(
@@ -169,8 +181,9 @@ def get_timeline_plot(song_df, granularity):
 
     return fig
 
-def get_top_per_period_plot(song_df, entity, metric, granularity):
-    # Aggregate data
+@st.cache_data(show_spinner=False)
+def get_top_per_period_plot_data(song_df, entity, metric, granularity):
+  # Aggregate data
     play_data = defaultdict(int)
     play_counts = defaultdict(int)
 
@@ -221,6 +234,10 @@ def get_top_per_period_plot(song_df, entity, metric, granularity):
 
     # Convert to minutes
     df["Minutes"] = df["ms"] / 1000 / 60
+
+    return df
+def get_top_per_period_plot(song_df, entity, metric, granularity):
+    df = get_top_per_period_plot_data(song_df, entity, metric, granularity)
 
     # Get top entity per period
     if metric == "Total Minutes":
@@ -278,67 +295,71 @@ def get_week_range(week_str):
     # Format as "DD-DD/MM/YY"
     return f"{first_day.day:01d}-{last_day.day:01d}/{first_day.month:01d}/{str(first_day.year)[-2:]}"
 
+@st.cache_data(show_spinner=False)
+def get_top_listening_combos_data(song_df, entries, metric, granularity, entity_type):
+  play_data = defaultdict(int)
+  play_counts = defaultdict(int)
+
+  song_df['ts'] = pd.to_datetime(song_df['ts'], format="%Y-%m-%dT%H:%M:%SZ")
+
+  # Create 'period' column based on granularity
+  if granularity == "Year":
+      song_df['period'] = song_df['ts'].dt.strftime("%Y")
+  elif granularity == "Month":
+      song_df['period'] = song_df['ts'].dt.strftime("%Y-%m")
+  elif granularity == "Week":
+      song_df['period'] = song_df['ts'].dt.strftime("%Y-W%V")
+  elif granularity == "Day":
+      song_df['period'] = song_df['ts'].dt.strftime("%Y-%m-%d")
+
+  # Create 'key' column based on entity_type
+  if entity_type == "Song":
+      song_df['key'] = list(zip(
+          song_df["master_metadata_track_name"],
+          song_df["master_metadata_album_artist_name"],
+          song_df["period"]
+      ))
+  elif entity_type == "Artist":
+      song_df['key'] = list(zip(
+          song_df["master_metadata_album_artist_name"],
+          song_df["period"]
+      ))
+  elif entity_type == "Album":
+      song_df['key'] = list(zip(
+          song_df["master_metadata_album_album_name"],
+          song_df["master_metadata_album_artist_name"],
+          song_df["period"]
+      ))
+
+  # Group by 'key' and aggregate
+  play_data_df = song_df.groupby('key')['ms_played'].sum()
+  play_counts_df = song_df[song_df['ms_played'] >= 30000].groupby('key').size()
+
+  # Convert to dictionaries if needed
+  play_data = play_data_df.to_dict()
+  play_counts = play_counts_df.to_dict()
+
+  # Convert to DataFrame based on entity type
+  if entity_type == "Song":
+      df = pd.DataFrame([
+          {"Track": k[0], "Artist": k[1], "Period": k[2], "ms": v, "Plays": play_counts.get(k, 0)}
+          for k, v in play_data.items()
+      ])
+  elif entity_type == "Artist":
+      df = pd.DataFrame([
+          {"Artist": k[0], "Period": k[1], "ms": v, "Plays": play_counts.get(k, 0)}
+          for k, v in play_data.items()
+      ])
+  elif entity_type == "Album":
+      df = pd.DataFrame([
+          {"Album": k[0], "Artist": k[1], "Period": k[2], "ms": v, "Plays": play_counts.get(k, 0)}
+          for k, v in play_data.items()
+      ])
+
+  return df
 def get_top_listening_combos(song_df, entries, metric, granularity, entity_type):
-    # Aggregate data
-    play_data = defaultdict(int)
-    play_counts = defaultdict(int)
 
-    song_df['ts'] = pd.to_datetime(song_df['ts'], format="%Y-%m-%dT%H:%M:%SZ")
-
-    # Create 'period' column based on granularity
-    if granularity == "Year":
-        song_df['period'] = song_df['ts'].dt.strftime("%Y")
-    elif granularity == "Month":
-        song_df['period'] = song_df['ts'].dt.strftime("%Y-%m")
-    elif granularity == "Week":
-        song_df['period'] = song_df['ts'].dt.strftime("%Y-W%V")
-    elif granularity == "Day":
-        song_df['period'] = song_df['ts'].dt.strftime("%Y-%m-%d")
-
-    # Create 'key' column based on entity_type
-    if entity_type == "Song":
-        song_df['key'] = list(zip(
-            song_df["master_metadata_track_name"],
-            song_df["master_metadata_album_artist_name"],
-            song_df["period"]
-        ))
-    elif entity_type == "Artist":
-        song_df['key'] = list(zip(
-            song_df["master_metadata_album_artist_name"],
-            song_df["period"]
-        ))
-    elif entity_type == "Album":
-        song_df['key'] = list(zip(
-            song_df["master_metadata_album_album_name"],
-            song_df["master_metadata_album_artist_name"],
-            song_df["period"]
-        ))
-
-    # Group by 'key' and aggregate
-    play_data_df = song_df.groupby('key')['ms_played'].sum()
-    play_counts_df = song_df[song_df['ms_played'] >= 30000].groupby('key').size()
-
-    # Convert to dictionaries if needed
-    play_data = play_data_df.to_dict()
-    play_counts = play_counts_df.to_dict()
-
-    # Convert to DataFrame based on entity type
-    if entity_type == "Song":
-        df = pd.DataFrame([
-            {"Track": k[0], "Artist": k[1], "Period": k[2], "ms": v, "Plays": play_counts.get(k, 0)}
-            for k, v in play_data.items()
-        ])
-    elif entity_type == "Artist":
-        df = pd.DataFrame([
-            {"Artist": k[0], "Period": k[1], "ms": v, "Plays": play_counts.get(k, 0)}
-            for k, v in play_data.items()
-        ])
-    elif entity_type == "Album":
-        df = pd.DataFrame([
-            {"Album": k[0], "Artist": k[1], "Period": k[2], "ms": v, "Plays": play_counts.get(k, 0)}
-            for k, v in play_data.items()
-        ])
-
+    df = get_top_listening_combos_data(song_df, entries, metric, granularity, entity_type)
     # Convert to minutes if needed
     if metric == "Total Minutes":
         df["value"] = df["ms"] / 1000 / 60
@@ -420,22 +441,28 @@ def get_top_listening_combos(song_df, entries, metric, granularity, entity_type)
 def truncate_name(name, max_len=50):
     return name if len(name) <= max_len else name[:max_len-3] + "..."
 
-def extract_data(json_files):
-  songs = list()
-  podcasts = list()
-  for file in json_files:
-      with open(file, "r") as f:
-          data = json.load(f)
-          for entry in data:
-              if (entry["spotify_track_uri"] is not None):
-                  songs.append(entry)
-              else:
-                  podcasts.append(entry)
-  df = pd.DataFrame(songs)
+@st.cache_data(show_spinner=False)
+def extract_data(uploaded_file):
+  zip_data = io.BytesIO(uploaded_file.read())
+  songs = []
+  podcasts = []
+  target_folder = "Spotify Extended Streaming History"
+  with zipfile.ZipFile(zip_data) as zip_ref:
+      for file_info in zip_ref.infolist():
+        if file_info.filename.startswith(target_folder + "/") and file_info.filename.endswith(".json"):
+          with zip_ref.open(file_info) as file:
+              data = json.load(file)
+              for entry in data:
+                  if entry["spotify_track_uri"] is not None:
+                      songs.append(entry)
+                  else:
+                      podcasts.append(entry)
 
-  df["year"] = pd.to_datetime(df["ts"]).dt.year
+        # Create DataFrame in memory
+  song_df = pd.DataFrame(songs)
+  song_df["year"] = pd.to_datetime(song_df["ts"]).dt.year
 
-  return df, podcasts
+  return song_df, podcasts
 
 plt.rcParams['text.usetex'] = False
 
@@ -449,12 +476,7 @@ with tab1:
 
   if uploaded_file:
     try:
-      for json_file in glob.glob("Spotify Extended Streaming History/*.json"):
-          os.remove(json_file)
-      with zipfile.ZipFile(uploaded_file, "r") as zip_ref:
-        zip_ref.extractall("")
-      json_files = glob.glob("Spotify Extended Streaming History/*.json")
-      song_df, podcasts = extract_data(json_files)
+      song_df, podcasts = extract_data(uploaded_file)
       st.session_state.song_df = song_df
 
       st.success("File uploaded successfully!")
@@ -488,10 +510,10 @@ with tab2:
 
         minutes = style == "Total Minutes"
 
-        plt = get_top_plot(st.session_state.song_df, selected_year, topic, entries, minutes, stacked)
-
-        with st.container(height=600):
-            st.pyplot(plt)
+        plot_container = st.empty()
+        with st.spinner("Drawing your chart..."):
+          plt = get_top_plot(st.session_state.song_df, selected_year, topic, entries, minutes, stacked)
+          plot_container.pyplot(plt)
     else:
         st.write("Please upload your file first.")
 
@@ -502,8 +524,10 @@ with tab3:
             ["Week", "Month", "Year"],
             index=1, key="granularity1")
 
-        fig = get_timeline_plot(st.session_state.song_df, granularity)
-        st.plotly_chart(fig, use_container_width=True)
+        plot_container = st.empty()
+        with st.spinner("Drawing your chart..."):
+          fig = get_timeline_plot(st.session_state.song_df, granularity)
+          plot_container.plotly_chart(fig, use_container_width=True)
     else:
         st.write("Please upload your file first.")
 
@@ -518,10 +542,11 @@ with tab4:
         with col3:
             granularity = st.selectbox("Granularity:", ["Month", "Year"], key="granularity2")
 
-        plt = get_top_per_period_plot(st.session_state.song_df, entity, metric, granularity)
+        plot_container = st.empty()
+        with st.spinner("Drawing your chart..."):
+          plt = get_top_per_period_plot(st.session_state.song_df, entity, metric, granularity)
+          plot_container.pyplot(plt)
 
-        with st.container(height=600):
-            st.pyplot(plt)
     else:
         st.write("Please upload your file first.")
 
@@ -537,10 +562,11 @@ with tab5:
         with col4:
             granularity = st.selectbox("Granularity:", ["Day", "Week", "Month", "Year"], index=2, key="granularity3")
 
-        plt = get_top_listening_combos(st.session_state.song_df, entries, metric, granularity, entity_type)
+        plot_container = st.empty()
+        with st.spinner("Drawing your chart..."):
+          plt = get_top_listening_combos(st.session_state.song_df, entries, metric, granularity, entity_type)
+          plot_container.pyplot(plt)
 
-        with st.container(height=600):
-            st.pyplot(plt)
     else:
         st.write("Please upload your file first.")
 
