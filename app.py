@@ -1130,7 +1130,7 @@ def get_map_plot(song_df):
 
 # Authenticate the user with Spotify
 def get_spotify_oauth():
-    redirect = "https://spotifydataanalysis.streamlit.app/"
+    redirect = "https://spotifydataanalysis.streamlit.app"
     scope = "playlist-modify-public playlist-modify-private"
     return SpotifyOAuth(
         client_id=st.secrets['spotify_client_id'],
