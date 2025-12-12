@@ -1264,8 +1264,8 @@ with tab2:
               
               auth_url = get_spotify_oauth().get_authorize_url()
               st.markdown(
-              f"<meta http-equiv='refresh' content='0; url={auth_url}'>",
-              unsafe_allow_html=True
+                  f"<a href='{auth_url}' target='_blank'>Click here to log in with Spotify</a>",
+                  unsafe_allow_html=True
               )
 
           # STEP 2 → If redirected back with ?code=...
