@@ -13,6 +13,8 @@ import os
 import requests
 import plotly.graph_objects as go
 import base64
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
 
 CACHE_FILE = "artist_genres_cache.json"
 
@@ -23,11 +25,8 @@ st.set_page_config(layout="wide")
 st.set_page_config(page_title="All-Time Spotify Recap", page_icon="🎵")
 
 @st.cache_data(show_spinner=False)
-def get_top_plot_data(song_df, selected_year, topic, minutes, stacked):
-  if selected_year != "All":
-      filtered_df = song_df[song_df["year"] == selected_year]
-  else:
-      filtered_df = song_df
+def get_top_plot_data(filtered_df, topic, minutes, stacked):
+  
   if topic == "Artists":
         if stacked:
             agg = filtered_df.groupby(["master_metadata_album_artist_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else filtered_df[filtered_df["ms_played"] >= 30000].groupby("master_metadata_album_artist_name").size().sort_values(ascending=False)
@@ -58,10 +57,7 @@ def get_top_plot_data(song_df, selected_year, topic, minutes, stacked):
 
   return agg
 
-def get_top_plot(song_df, selected_year, topic, entries, minutes, stacked):
-
-    agg = get_top_plot_data(song_df, selected_year, topic, minutes, stacked)
-    agg_top = agg[0:entries]
+def get_top_plot(agg_top, topic, minutes, stacked):    
     height = len(agg_top) * 0.55
 
     if (topic in ["Songs", "Albums"]):
@@ -554,8 +550,8 @@ def get_top_genres_plot(song_df, entries, selected_year):
     x_range = [0, max_minutes * 1.2]
 
     num_entries = len(genres)
-    bar_height = 30 
-    fig_height = num_entries * bar_height + 200 
+    bar_height = 30
+    fig_height = num_entries * bar_height + 200
     ranking_text = [f"{i}" for i in range(1, num_entries + 1)]
 
     fig = go.Figure(
@@ -567,7 +563,7 @@ def get_top_genres_plot(song_df, entries, selected_year):
             hovertemplate="%{hovertext}<extra></extra>",
             marker=dict(color="skyblue"),
             text=ranking_text,
-            insidetextanchor="start", 
+            insidetextanchor="start",
             textfont=dict(size=10, color="white"),
         )
     )
@@ -575,13 +571,13 @@ def get_top_genres_plot(song_df, entries, selected_year):
     for i, (genre, minutes) in enumerate(zip(genres, total_minutes)):
         fig.add_annotation(
             xref="x", yref="y",
-            x=minutes, 
+            x=minutes,
             y=genre,
             text=f"{minutes:.1f}",
             showarrow=False,
             font=dict(size=12, color="white"),
             xanchor="left",
-            xshift=10, 
+            xshift=10,
         )
 
     fig.update_layout(
@@ -590,11 +586,11 @@ def get_top_genres_plot(song_df, entries, selected_year):
         yaxis_title="Genre",
         yaxis=dict(
             autorange="reversed",
-            fixedrange=False, 
+            fixedrange=False,
         ),
         xaxis=dict(range=x_range),
         margin=dict(r=150),
-        height=fig_height, 
+        height=fig_height,
     )
 
     return fig
@@ -1119,7 +1115,7 @@ def get_map_plot(song_df):
     locationmode="ISO-3",
     color="total_minutes",
     hover_name="country_name",
-    hover_data={"total_minutes": True},     
+    hover_data={"total_minutes": True},
     color_continuous_scale="Viridis",
     title="Total Minutes Played by Country",
   )
@@ -1132,6 +1128,44 @@ def get_map_plot(song_df):
 
   return fig
 
+# Authenticate the user with Spotify
+def get_spotify_oauth():
+    redirect = "https://spotifydataanalysis.streamlit.app/"
+    scope = "playlist-modify-public playlist-modify-private"
+    return SpotifyOAuth(
+        client_id=st.secrets['spotify_client_id'],
+        client_secret=st.secrets['spotify_secret_id'],
+        redirect_uri=redirect,
+        scope=scope,
+        cache_path=".spotify_cache",
+        show_dialog=True,
+    )
+
+@st.cache_data(show_spinner=False)
+def get_track_uris_for_playlist(agg, filtered_df):
+    if isinstance(agg.index, pd.MultiIndex):
+        # Get the top song names from the aggregated data
+        track_names = agg.index.get_level_values("master_metadata_track_name")
+        artist_names = agg.index.get_level_values("master_metadata_album_artist_name")
+        # Filter the original DataFrame to get the track URIs
+        track_uris = filtered_df[
+            (filtered_df["master_metadata_track_name"].isin(track_names)) &
+            (filtered_df["master_metadata_album_artist_name"].isin(artist_names))
+        ]["spotify_track_uri"].unique().tolist()
+    else:
+        # Fallback for non-MultiIndex (shouldn't happen for Songs)
+        track_uris = []
+
+    return track_uris
+
+# Create a playlist in the user's account
+def create_spotify_playlist(agg, filtered_df, playlist_name):
+    sp = authenticate_spotify()  
+    track_uris = get_track_uris_for_playlist(agg, filtered_df)
+    user_id = sp.current_user()["id"]
+    playlist = sp.user_playlist_create(user_id, playlist_name, public=False)
+    sp.playlist_add_items(playlist["id"], track_uris)
+    return playlist["external_urls"]["spotify"]
 
 def get_access_token():
     token_url = "https://accounts.spotify.com/api/token"
@@ -1213,10 +1247,56 @@ with tab2:
             stacked = st.checkbox("Stacked values per year?", value=False)
 
         minutes = style == "Total Minutes"
+        if selected_year != "All":
+          filtered_df = song_df[song_df["year"] == selected_year]
+        else:
+          filtered_df = song_df
 
+        agg = get_top_plot_data(filtered_df, topic, minutes, stacked)
+        agg_top = agg[0:entries]
+
+        if topic == "Songs":
+          
+          params = st.query_params
+          code = params.get("code")
+          # STEP 1 → Button: Begin login flow
+          if st.button("Create Playlist") and code is None:
+              
+              auth_url = get_spotify_oauth().get_authorize_url()
+              st.markdown(
+              f"<meta http-equiv='refresh' content='0; url={auth_url}'>",
+              unsafe_allow_html=True
+              )
+
+          # STEP 2 → If redirected back with ?code=...
+          elif code:
+              oauth = get_spotify_oauth()
+              token_info = oauth.get_access_token(code)
+              sp = spotipy.Spotify(auth=token_info["access_token"])
+
+              # Fetch user info
+              user = sp.current_user()
+              user_id = user["id"]
+
+              # Create playlist
+              playlist_name = "My Streamlit Playlist"
+              playlist = sp.user_playlist_create(
+                  user_id,
+                  playlist_name,
+                  public=False,
+                  description="Created automatically from Streamlit"
+              )
+              st.success(f"Playlist '{playlist_name}' created successfully!")
+              st.write("🎧 Playlist URL:", playlist["external_urls"]["spotify"])
+                    # if st.button("Generate Spotify Playlist"):
+          #   try:            
+          #       playlist_url = create_spotify_playlist(filtered_df, agg_top, "My Top Songs Playlist")
+          #       st.success(f"Playlist created! [Open in Spotify]({playlist_url})")
+          #   except Exception as e:
+          #       st.error(f"Failed to create playlist: {e}")
         plot_container = st.empty()
         with st.spinner("Drawing your chart..."):
-          plt = get_top_plot(st.session_state.song_df, selected_year, topic, entries, minutes, stacked)
+          plt = get_top_plot(agg_top, topic, minutes, stacked)
         plot_container.pyplot(plt)
     else:
         st.write("Please upload your file first.")
