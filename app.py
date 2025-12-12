@@ -9,61 +9,63 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import matplotlib
 import io
-import plotly
-import hashlib
+import os
+import requests
+import plotly.graph_objects as go
+import base64
+
+CACHE_FILE = "artist_genres_cache.json"
 
 matplotlib.use('Agg')  # Use non-interactive backend
 plt.ioff()
 
+st.set_page_config(layout="wide")
 st.set_page_config(page_title="All-Time Spotify Recap", page_icon="🎵")
 
 @st.cache_data(show_spinner=False)
-def get_top_plot_data(song_df, selected_year, topic, entries, minutes, stacked):
+def get_top_plot_data(song_df, selected_year, topic, minutes, stacked):
   if selected_year != "All":
       filtered_df = song_df[song_df["year"] == selected_year]
   else:
       filtered_df = song_df
   if topic == "Artists":
         if stacked:
-            agg = song_df.groupby(["master_metadata_album_artist_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else song_df[song_df["ms_played"] >= 30000].groupby("master_metadata_album_artist_name").size().sort_values(ascending=False)
+            agg = filtered_df.groupby(["master_metadata_album_artist_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else filtered_df[filtered_df["ms_played"] >= 30000].groupby("master_metadata_album_artist_name").size().sort_values(ascending=False)
             agg["total"] = agg.sum(axis=1)
             agg = agg.sort_values("total", ascending=False)
             agg = agg.drop(columns="total")
         else:
-            agg = song_df.groupby("master_metadata_album_artist_name")["ms_played"].sum().sort_values(ascending=False) if minutes else song_df[song_df["ms_played"] >= 30000].groupby("master_metadata_album_artist_name").size().sort_values(ascending=False)
+            agg = filtered_df.groupby("master_metadata_album_artist_name")["ms_played"].sum().sort_values(ascending=False) if minutes else filtered_df[filtered_df["ms_played"] >= 30000].groupby("master_metadata_album_artist_name").size().sort_values(ascending=False)
   elif topic == "Songs":
         if stacked:
-            agg = song_df.groupby(["master_metadata_album_artist_name","master_metadata_track_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else song_df[song_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_track_name", "year"]).size().unstack(fill_value=0)
+            agg = filtered_df.groupby(["master_metadata_album_artist_name","master_metadata_track_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else filtered_df[filtered_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_track_name", "year"]).size().unstack(fill_value=0)
             agg["total"] = agg.sum(axis=1)
             agg = agg.sort_values("total", ascending=False)
             agg = agg.drop(columns="total")
         else:
-            agg = song_df.groupby(["master_metadata_album_artist_name","master_metadata_track_name"])["ms_played"].sum().sort_values(ascending=False) if minutes else song_df[song_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_track_name"]).size().sort_values(ascending=False)
+            agg = filtered_df.groupby(["master_metadata_album_artist_name","master_metadata_track_name"])["ms_played"].sum().sort_values(ascending=False) if minutes else filtered_df[filtered_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_track_name"]).size().sort_values(ascending=False)
   elif topic == "Albums":
         if stacked:
-            agg = song_df.groupby(["master_metadata_album_artist_name","master_metadata_album_album_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else song_df[song_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_album_album_name", "year"]).size().unstack(fill_value=0)
+            agg = filtered_df.groupby(["master_metadata_album_artist_name","master_metadata_album_album_name", "year"])["ms_played"].sum().unstack(fill_value=0) if minutes else filtered_df[filtered_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_album_album_name", "year"]).size().unstack(fill_value=0)
             agg["total"] = agg.sum(axis=1)
             agg = agg.sort_values("total", ascending=False)
             agg = agg.drop(columns="total")
         else:
-            agg = song_df.groupby(["master_metadata_album_artist_name","master_metadata_album_album_name"])["ms_played"].sum().sort_values(ascending=False) if minutes else song_df[song_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_album_album_name"]).size().sort_values(ascending=False)
+            agg = filtered_df.groupby(["master_metadata_album_artist_name","master_metadata_album_album_name"])["ms_played"].sum().sort_values(ascending=False) if minutes else filtered_df[filtered_df["ms_played"] >= 30000].groupby(["master_metadata_album_artist_name","master_metadata_album_album_name"]).size().sort_values(ascending=False)
 
   if minutes:
     agg = agg / 60000  # Convert to minutes
 
-  agg_top = agg[0:entries]
-
-  return agg_top
+  return agg
 
 def get_top_plot(song_df, selected_year, topic, entries, minutes, stacked):
 
-    agg_top = get_top_plot_data(song_df, selected_year, topic, entries, minutes, stacked)
+    agg = get_top_plot_data(song_df, selected_year, topic, minutes, stacked)
+    agg_top = agg[0:entries]
     height = len(agg_top) * 0.55
 
     if (topic in ["Songs", "Albums"]):
-      agg_top.index = agg_top.index.map(lambda x: f"{x[1]} ({x[0]})")
-
-    agg_top.index = agg_top.index.map(truncate_name)
+      agg_top.index = agg_top.index.map(lambda x: f"{truncate_name(x[1], x[0])}")
 
     if stacked:
         fig, ax = plt.subplots(figsize=(12, height))
@@ -438,8 +440,176 @@ def get_top_listening_combos(song_df, entries, metric, granularity, entity_type)
 
     return plt
 
-def truncate_name(name, max_len=50):
-    return name if len(name) <= max_len else name[:max_len-3] + "..."
+def truncate_name(x0, x1, max_len=60):
+  if len(x0 + x1) > max_len:
+    position = max_len - len(x1) - 3
+    return x0[:(position if position > 0 else 1)] + "..." + " (" + x1 + ")"
+  else:
+    return f"{x0} ({x1})"
+
+def load_genre_cache():
+    """Load the genre cache from the JSON file."""
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_genre_cache(cache):
+    """Save the genre cache to the JSON file."""
+    with open(CACHE_FILE, "w") as f:
+        json.dump(cache, f, indent=2)
+
+@st.cache_data(show_spinner=False)
+def get_top_genres_plot_data(song_df):
+    access_token = get_access_token()
+
+    artist_names = song_df["master_metadata_album_artist_name"].unique().tolist()
+
+    cache = load_genre_cache()
+    missing_artist_names = [name for name in artist_names if name not in cache]
+
+    if missing_artist_names:
+
+        artist_track_uris = {}
+        for name in missing_artist_names:
+
+            track_uri = song_df[song_df["master_metadata_album_artist_name"] == name]["spotify_track_uri"].iloc[0]
+            artist_track_uris[name] = track_uri.split(':')[-1]
+
+        track_uris = list(artist_track_uris.values())
+        artist_ids = {}
+
+        batch_size = 50
+        for i in range(0, len(track_uris), batch_size):
+            batch = track_uris[i:i + batch_size]
+            tracks_url = f"https://api.spotify.com/v1/tracks?ids={','.join(batch)}"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get(tracks_url, headers=headers)
+
+            if response.status_code == 200:
+                tracks = response.json()["tracks"]
+                for track in tracks:
+                    if track and "artists" in track and track["artists"]:
+                        artist_id = track["artists"][0]["id"]
+                        artist_name = next(
+                            name for name, uri in artist_track_uris.items()
+                            if uri == f"{track['id']}"
+                        )
+                        artist_ids[artist_name] = artist_id
+
+        if artist_ids:
+            batch_size = 50
+            for i in range(0, len(artist_ids), batch_size):
+                batch = list(artist_ids.values())[i:i + batch_size]
+                artists_url = f"https://api.spotify.com/v1/artists?ids={','.join(batch)}"
+                headers = {"Authorization": f"Bearer {access_token}"}
+                response = requests.get(artists_url, headers=headers)
+
+                if response.status_code == 200:
+                    artists = response.json()["artists"]
+                    for artist in artists:
+                        if artist and "genres" in artist:
+                            artist_name = next(
+                                name for name, aid in artist_ids.items()
+                                if aid == artist["id"]
+                            )
+                            cache[artist_name] = artist["genres"]
+
+        save_genre_cache(cache)
+
+    artist_genres = {name: cache.get(name, []) for name in artist_names}
+
+    artist_listening_time = song_df.groupby("master_metadata_album_artist_name")["ms_played"].sum().to_dict()
+
+    genre_data = defaultdict(lambda: {"total_ms": 0, "artists": defaultdict(int)})
+    for artist_name in artist_names:
+        total_ms = artist_listening_time.get(artist_name, 0)
+        genres = artist_genres.get(artist_name, [])
+        for genre in genres:
+            genre_data[genre]["total_ms"] += total_ms
+            genre_data[genre]["artists"][artist_name] += total_ms
+
+    sorted_genres = sorted(genre_data.items(), key=lambda x: x[1]["total_ms"], reverse=True)
+
+    return sorted_genres
+
+def get_top_genres_plot(song_df, entries, selected_year):
+
+    if selected_year != "All":
+        filtered_df = song_df[song_df["year"] == selected_year]
+    else:
+        filtered_df = song_df
+    sorted_genres = get_top_genres_plot_data(filtered_df)
+
+    genres = []
+    total_minutes = []
+    hover_texts = []
+    for genre, data in sorted_genres[:entries]:
+        genres.append(genre)
+        total_minutes.append(data["total_ms"] / 60000)
+        top_artists = sorted(data["artists"].items(), key=lambda x: x[1], reverse=True)[:5]
+        artist_list ="<b>Top 5</b> <br>" + "<br>".join([f"{artist}: {ms / 60000:.1f} min" for artist, ms in top_artists])
+        hover_texts.append(f"{artist_list}")
+    max_minutes = max(total_minutes)
+    x_range = [0, max_minutes * 1.2]
+
+    num_entries = len(genres)
+    bar_height = 30 
+    fig_height = num_entries * bar_height + 200 
+    ranking_text = [f"{i}" for i in range(1, num_entries + 1)]
+
+    fig = go.Figure(
+        go.Bar(
+            x=total_minutes,
+            y=genres,
+            orientation="h",
+            hovertext=hover_texts,
+            hovertemplate="%{hovertext}<extra></extra>",
+            marker=dict(color="skyblue"),
+            text=ranking_text,
+            insidetextanchor="start", 
+            textfont=dict(size=10, color="white"),
+        )
+    )
+
+    for i, (genre, minutes) in enumerate(zip(genres, total_minutes)):
+        fig.add_annotation(
+            xref="x", yref="y",
+            x=minutes, 
+            y=genre,
+            text=f"{minutes:.1f}",
+            showarrow=False,
+            font=dict(size=12, color="white"),
+            xanchor="left",
+            xshift=10, 
+        )
+
+    fig.update_layout(
+        title=f"Top Genres by Total Minutes ({'All Years' if selected_year == 'All' else selected_year})",
+        xaxis_title="Total Minutes",
+        yaxis_title="Genre",
+        yaxis=dict(
+            autorange="reversed",
+            fixedrange=False, 
+        ),
+        xaxis=dict(range=x_range),
+        margin=dict(r=150),
+        height=fig_height, 
+    )
+
+    return fig
+
+def get_access_token():
+    token_url = "https://accounts.spotify.com/api/token"
+    auth_header = base64.b64encode(f"{st.secrets['spotify_client_id']}:{st.secrets['spotify_secret_id']}".encode()).decode()
+
+    response = requests.post(
+        token_url,
+        headers={"Authorization": f"Basic {auth_header}"},
+        data={"grant_type": "client_credentials"},
+    )
+    response.raise_for_status()
+    return response.json()["access_token"]
 
 @st.cache_data(show_spinner=False)
 def extract_data(uploaded_file):
@@ -469,7 +639,7 @@ plt.rcParams['text.usetex'] = False
 # Title
 st.title("All-Time Spotify Recap")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["File Upload", "Your Favorites", "Your Music Timeline", "Favorites per Period", "Your Biggest Addictions", "Suggestions"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["File Upload", "Your Favorites", "Your Music Timeline", "Favorites per Period", "Your Biggest Addictions", "Your Styles", "Suggestions"])
 
 with tab1:
   uploaded_file = st.file_uploader("Upload your ZIP file", type=["zip"])
@@ -513,7 +683,7 @@ with tab2:
         plot_container = st.empty()
         with st.spinner("Drawing your chart..."):
           plt = get_top_plot(st.session_state.song_df, selected_year, topic, entries, minutes, stacked)
-          plot_container.pyplot(plt)
+        plot_container.pyplot(plt)
     else:
         st.write("Please upload your file first.")
 
@@ -525,9 +695,8 @@ with tab3:
             index=1, key="granularity1")
 
         plot_container = st.empty()
-        with st.spinner("Drawing your chart..."):
-          fig = get_timeline_plot(st.session_state.song_df, granularity)
-          plot_container.plotly_chart(fig, use_container_width=True)
+        fig = get_timeline_plot(st.session_state.song_df, granularity)
+        plot_container.plotly_chart(fig, use_container_width=True)
     else:
         st.write("Please upload your file first.")
 
@@ -543,9 +712,8 @@ with tab4:
             granularity = st.selectbox("Granularity:", ["Month", "Year"], key="granularity2")
 
         plot_container = st.empty()
-        with st.spinner("Drawing your chart..."):
-          plt = get_top_per_period_plot(st.session_state.song_df, entity, metric, granularity)
-          plot_container.pyplot(plt)
+        plt = get_top_per_period_plot(st.session_state.song_df, entity, metric, granularity)
+        plot_container.pyplot(plt)
 
     else:
         st.write("Please upload your file first.")
@@ -563,14 +731,32 @@ with tab5:
             granularity = st.selectbox("Granularity:", ["Day", "Week", "Month", "Year"], index=2, key="granularity3")
 
         plot_container = st.empty()
-        with st.spinner("Drawing your chart..."):
-          plt = get_top_listening_combos(st.session_state.song_df, entries, metric, granularity, entity_type)
-          plot_container.pyplot(plt)
+        plt = get_top_listening_combos(st.session_state.song_df, entries, metric, granularity, entity_type)
+        plot_container.pyplot(plt)
 
     else:
         st.write("Please upload your file first.")
 
 with tab6:
+  if uploaded_file:
+    col1, col2 = st.columns(2)
+    with col1:
+      entries = st.selectbox("Number of Entries:", [10, 25, 50], key="genre_entries")
+    with col2:
+      available_years = sorted(song_df["year"].unique().tolist())
+      available_years = ["All"] + available_years
+      year = st.selectbox("Filter by Year:", available_years)
+    plot_container = st.empty()
+    with st.spinner("Fetching genres and drawing chart..."):
+        try:
+            fig = get_top_genres_plot(st.session_state.song_df, entries, year)
+            plot_container.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"Failed to generate chart: {e}")
+  else:
+        st.write("Please upload your file first.")
+
+with tab7:
     st.text("Did you find a bug or have any suggestion? Contact me and I'll try to do it asap!")
 
     with st.form("suggestions_form"):
@@ -590,7 +776,7 @@ with tab6:
                     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
                     <script>
                         (function() {{
-                            emailjs.init('L7Pzgd--LnzVhQLuH'); // Replace with your Public Key
+                            emailjs.init('{st.secrets['email_public_key']}'); // Replace with your Public Key
 
                             var params = {{
                                 name: "{name}",
@@ -598,7 +784,7 @@ with tab6:
                                 reply_to: "{name}",
                             }};
 
-                            emailjs.send('service_c769bis', 'template_19n6dyp', params) // Replace with your Service ID and Template ID
+                            emailjs.send('{st.secrets['email_service_id']}', '{st.secrets['email_template_id']}', params) // Replace with your Service ID and Template ID
                                 .then(function(response) {{
                                     document.write('<p style="color: green;">Thank you for your feedback! 🎉</p>');
                                     console.log('SUCCESS!', response.status, response.text);
