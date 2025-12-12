@@ -1144,9 +1144,10 @@ def get_spotify_oauth():
 @st.cache_data(show_spinner=False)
 def get_track_uris_for_playlist(agg, filtered_df):
     if isinstance(agg.index, pd.MultiIndex):
-        # Get the top song names from the aggregated data
-        track_names = agg.index.get_level_values("master_metadata_track_name")
-        artist_names = agg.index.get_level_values("master_metadata_album_artist_name")
+        # Get the top song names and artists from the aggregated data
+        track_names = agg.index.get_level_values(1)  # master_metadata_track_name
+        artist_names = agg.index.get_level_values(0)  # master_metadata_album_artist_name
+
         # Filter the original DataFrame to get the track URIs
         track_uris = filtered_df[
             (filtered_df["master_metadata_track_name"].isin(track_names)) &
@@ -1264,30 +1265,25 @@ with tab2:
               
               auth_url = get_spotify_oauth().get_authorize_url()
               st.markdown(
-                  f"<a href='{auth_url}' target='_blank'>Click here to log in with Spotify</a>",
-                  unsafe_allow_html=True
+              f"<meta http-equiv='refresh' content='0; url={auth_url}'>",
+              unsafe_allow_html=True
               )
 
           # STEP 2 → If redirected back with ?code=...
           elif code:
               oauth = get_spotify_oauth()
-              token_info = oauth.get_access_token(code)
+              token_info = oauth.get_cached_token(code)
               sp = spotipy.Spotify(auth=token_info["access_token"])
 
-              # Fetch user info
-              user = sp.current_user()
-              user_id = user["id"]
+              track_uris = get_track_uris_for_playlist(agg_top, filtered_df)
 
               # Create playlist
-              playlist_name = "My Streamlit Playlist"
-              playlist = sp.user_playlist_create(
-                  user_id,
-                  playlist_name,
-                  public=False,
-                  description="Created automatically from Streamlit"
-              )
-              st.success(f"Playlist '{playlist_name}' created successfully!")
-              st.write("🎧 Playlist URL:", playlist["external_urls"]["spotify"])
+              user_id = sp.current_user()["id"]
+              playlist_name = "My Top Songs Playlist"
+              playlist = sp.user_playlist_create(user_id, playlist_name, public=False)
+              sp.playlist_add_items(playlist["id"], track_uris)
+      
+              st.success(f"Playlist created! [Open in Spotify]({playlist['external_urls']['spotify']})")
                     # if st.button("Generate Spotify Playlist"):
           #   try:            
           #       playlist_url = create_spotify_playlist(filtered_df, agg_top, "My Top Songs Playlist")
