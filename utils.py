@@ -1,3 +1,9 @@
+from datetime import datetime, timedelta
+import os
+import json
+import requests
+import base64
+
 def get_week_range(week_str):
           year, week = week_str.split("-W")
           year = int(year)
@@ -32,16 +38,16 @@ def truncate_name(x0, x1, max_len=60):
   else:
     return f"{x0} ({x1})"
 
-def load_genre_cache():
+def load_genre_cache(filename):
     """Load the genre cache from the JSON file."""
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r") as f:
+    if os.path.exists(filename):
+        with open(filename, "r") as f:
             return json.load(f)
     return {}
 
-def save_genre_cache(cache):
+def save_genre_cache(cache, filename):
     """Save the genre cache to the JSON file."""
-    with open(CACHE_FILE, "w") as f:
+    with open(filename, "w") as f:
         json.dump(cache, f, indent=2)
 
 def get_access_token():
