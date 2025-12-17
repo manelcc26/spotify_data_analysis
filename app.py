@@ -231,7 +231,7 @@ def get_top_per_period_plot(song_df, entity, metric, granularity):
 
     if entity == "Song":
         top_per_period["Label"] = top_per_period.apply(
-            lambda row: f"{row['Period']} – {truncate_name(row['Track'], row['Artist'])})",
+            lambda row: f"{row['Period']} – {truncate_name(row['Track'], row['Artist'])}",
             axis=1
         )
     elif entity == "Artist":
@@ -241,7 +241,7 @@ def get_top_per_period_plot(song_df, entity, metric, granularity):
         )
     elif entity == "Album":
         top_per_period["Label"] = top_per_period.apply(
-            lambda row: f"{row['Period']} – {truncate_name(row['Album'], row['Artist'])})",
+            lambda row: f"{row['Period']} – {truncate_name(row['Album'], row['Artist'])}",
             axis=1
         )
 
@@ -336,7 +336,7 @@ def get_top_listening_combos(song_df, entries, metric, granularity, entity_type)
 
     if entity_type == "Song":
         top_entries["Label"] = top_entries.apply(
-            lambda row: f"{row['FormattedPeriod']} - {truncate_name(row['Track'], row['Artist'])})",
+            lambda row: f"{row['FormattedPeriod']} - {truncate_name(row['Track'], row['Artist'])}",
             axis=1
         )
     elif entity_type == "Artist":
@@ -346,7 +346,7 @@ def get_top_listening_combos(song_df, entries, metric, granularity, entity_type)
         )
     elif entity_type == "Album":
         top_entries["Label"] = top_entries.apply(
-            lambda row: f"{row['FormattedPeriod']} - {truncate_name(row['Album'], row['Artist'])})",
+            lambda row: f"{row['FormattedPeriod']} - {truncate_name(row['Album'], row['Artist'])}",
             axis=1
         )
 
